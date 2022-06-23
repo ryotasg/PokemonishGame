@@ -21,11 +21,8 @@ public class Server extends Thread {
     ServerSocket serverSocket;
     ClientInfo clientsInfo[] = new ClientInfo[MAX_CONNECTIONS]; // クライアント間で通信するためのメンバ変数
     Move[] importedMoves;
-    // 対戦待ちの人のリスト
     List<Integer> waitingPlayers = new ArrayList<Integer>();// 対戦待ちリスト
-    // 登録最中の人のリスト、サーバに名前(アカウント)が登録されるのはパスワードを設定してからなので
-    // パスワード設定中に他の人が同じ名前で登録してしまわないようにこのリストを使う
-    List<String> registeList = new ArrayList<String>();
+    List<String> registeList = new ArrayList<String>();// 登録リスト
 
     public static void main(String[] args) throws IOException {
         new Server();
@@ -40,11 +37,8 @@ public class Server extends Thread {
             serverSocket = new ServerSocket(PORT);
             System.out.println("サーバーが起動しました\n");
             importedMoves = fetchMovesFromCsv("./server/bin/moves.csv");
-            // debug用のin server.debug関数を定義するとサーバー側で標準入力して確認に使える
             BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
             while (true) {
-                // 接続待ちの時はsocket.acceptの部分でブロッキングされるのでdebug関数が呼び出されるのは
-                // クライアントが接続された直後
                 if(in.ready()){
                     String input = in.readLine();
                     debug(input);
@@ -66,18 +60,14 @@ public class Server extends Thread {
     }
 
     private void debug(String input) {
-        // サーバー側でrenewmoveと打つと技を更新する。
-        //　サーバーを起動した後でも技を追加削除できる
-        if(input.equals("renewmove")){
-            fetchMovesFromCsv("./server/bin/moves.csv");
-        }
+        logging("a");
     }
 
     /*
      * 確認関連
      */
     // 名前が重複していたらtrueを返す
-    public boolean isDuplicationName(String name) {
+    public boolean isDuplicateName(String name) {
         for (int i = 0; i < MAX_CONNECTIONS; i++) {
             if (clientsInfo[i] != null && clientsInfo[i].name.equals(name)) {
                 return true;
@@ -104,9 +94,7 @@ public class Server extends Thread {
     public boolean isValidAccount(String name, String password) throws NoSuchAlgorithmException {
         byte[] hashedPassword = ClientInfo.getHashedPass(password);
         for (int i = 0; i < MAX_CONNECTIONS; i++) {
-            if (clientsInfo[i] != null && 
-                clientsInfo[i].name.equals(name) &&
-                !clientsInfo[i].online) {
+            if (clientsInfo[i] != null && clientsInfo[i].name.equals(name)) {
                 byte[] storedPassword = clientsInfo[i].getPassward();
                 if(storedPassword.length != hashedPassword.length){
                     return false;
@@ -130,7 +118,7 @@ public class Server extends Thread {
             return true;
         } else if (mySpeed < opponentSpeed) {
             return false;
-        } else if (myId < opponentId) { //mySpeed=opponentSpeedのとき
+        } else if (myId < opponentId) {
             return true;
         } else {
             return false;
@@ -177,13 +165,14 @@ public class Server extends Thread {
                 String line;
                 while ((line = br.readLine()) != null) {
                     String[] moveInfo = line.split(",");
-                    if (moveInfo.length > 4) {
+                    if (moveInfo.length > 5) {
                         moves.add(new Move(
                                 moveInfo[0],
                                 Integer.parseInt(moveInfo[1]),
                                 Integer.parseInt(moveInfo[2]),
                                 Integer.parseInt(moveInfo[3]),
-                                moveInfo[4].equals("1") ? true : false));
+                                moveInfo[4].equals("1") ? true : false,
+                                Integer.parseInt(moveInfo[5])));    //命中率追加
                         i++;
                     }
                 }
@@ -207,7 +196,7 @@ public class Server extends Thread {
         for (int i = 0; i < moves.length; i++) {
             list.add(i);
         }
-        for (int i = 0; i < 30; i++) { 
+        for (int i = 0; i < 30; i++) {
             Collections.shuffle(list);
         }
         Move returnMove[] = new Move[4];
@@ -229,7 +218,7 @@ public class Server extends Thread {
         }
     }
 
-    // 対戦開始前に対戦開始待ちリストから削除する
+    // 対戦開始前に対戦開始リストから削除する
     public void removeWaitingPlayer(int id) {
         if(waitingPlayers.indexOf(id) == 0) {
             waitingPlayers.remove(1);
@@ -299,7 +288,17 @@ public class Server extends Thread {
             clientsInfo[myId].send(result);
             clientsInfo[opponentId].send(result);
             return;
-        } else {
+        } else if((100-myMove.hitRate) > Math.random()*100){                      //技が命中しなかった場合
+            clientsInfo[myId].monster.moves[moveIdx].count--;//命中しなくてもPP減らす
+            result = partition + "\n" +
+                    myName + "は" +
+                    myMove.name + "を使用した!\n" +
+                    "しかし" +
+                    opponentName + "には当たらなかった!\n" +partition + "\n";
+            clientsInfo[myId].send(result);
+            clientsInfo[opponentId].send(result);
+        }
+        else {
             String compatibility;
             double multiplier = myMove.calculateMultiplier(clientsInfo[myId].monster,
                     clientsInfo[opponentId].monster);
